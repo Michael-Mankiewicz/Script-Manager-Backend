@@ -33,12 +33,21 @@ class AddressCorrectionBot:
 
         abs_cartonfile_path = os.path.join(settings.MEDIA_ROOT, self.carton_file)
         abs_fedexinvoice_path = os.path.join(settings.MEDIA_ROOT, self.fedex_invoice)
+        print(f"Absolute Carton File Path: {abs_cartonfile_path}")
+        print(f"Absolute FedEx Invoice Path: {abs_fedexinvoice_path}")
+        if not os.path.isfile(abs_cartonfile_path):
+            raise FileNotFoundError(f"Carton file not found at {abs_cartonfile_path}")
+        if not os.path.isfile(abs_fedexinvoice_path):
+            raise FileNotFoundError(f"FedEx invoice file not found at {abs_fedexinvoice_path}")
         
+        print("type of invoice path:" + str(type(abs_fedexinvoice_path)))
         rowsList = self.AddressCorrectionSearch(abs_fedexinvoice_path)
         rowsList = self.CompileNewCSVFile(rowsList, abs_cartonfile_path)
         projectsData = self.SortCSVbyProject(rowsList)
         self.CreateInvoice(projectsData)
-        self.delete_non_xlsx_files('results')
+        results_dir = os.path.join(settings.MEDIA_ROOT, 'results')
+        os.makedirs(results_dir, exist_ok=True)
+        self.delete_non_xlsx_files(results_dir)
 
         generated_files = [os.path.join(results_path, filename) for filename in os.listdir(results_path)]
         return generated_files
@@ -48,10 +57,9 @@ class AddressCorrectionBot:
         with open(csv_file_path, 'r', newline='', encoding='utf-8') as file:
             reader = csv.reader(file)
             for row_num, row in enumerate(reader):
-                # Search for the term in each cell of the row
                 for col_index, cell in enumerate(row):
+                    #print("read this cell: " + cell + " at " + str(col_index))
                     if search_term == cell:
-                        # Return the index of the column and the entire row
                         return col_index, row
         return None, None
 
@@ -63,22 +71,20 @@ class AddressCorrectionBot:
             reader = csv.reader(file)
             header = next(reader)
             col_index, addr_corr_row = self.find_address_correction_column(csvFilePath, search_term)
-            #print(f'col inex: {col_index} addr_corr_row: {addr_corr_row}')
             if col_index == None:
                 raise ValueError(f"No rows matching {search_term} were found")
 
             for row_num, row in enumerate(reader):
                 if len(row) > col_index:  # Ensure the row has enough columns
                     cell_content = row[col_index].strip()  # Use .strip() to remove any leading/trailing spaces
-                    #print(f"Row {row_num}, Column {col_index}: '{cell_content}'")  # Debugging line
                     if cell_content == search_term:
                         resulting_rows.append(row)
-                        #print(f"Match found in row {row_num}: {cell_content}")
                 else:
                     print(f"Row {row_num} does not have a column {col_index}")
 
         #print("Rows after filter:", len(resulting_rows))
         return resulting_rows
+
 
     def CompileNewCSVFile(self, rowsWithAddrCorr, cartonFilePath):
         #Invoice Date
@@ -100,6 +106,9 @@ class AddressCorrectionBot:
         addrCorrInvoiceData = []
 
         current_date = datetime.now().strftime("%Y-%m-%d")
+
+
+
         for row in rowsWithAddrCorr:
             infoNeededFromFedex = []
             for index in fedexInvoiceColumns:
@@ -110,7 +119,10 @@ class AddressCorrectionBot:
 
         self.LinkProject(addrCorrInvoiceData, cartonFilePath)
 
-        filename = f'results/Ungrouped_projects_{current_date}.csv'
+        results_dir = os.path.join(settings.MEDIA_ROOT, 'results')
+        os.makedirs(results_dir, exist_ok=True)
+        filename = os.path.join(results_dir, f'Ungrouped_projects_{current_date}.csv')
+
         with open(filename, 'w', newline='', encoding='utf-8') as file:
             writer = csv.writer(file)
 
@@ -151,6 +163,8 @@ class AddressCorrectionBot:
         projects = {}
 
         current_date = datetime.now().strftime("%Y-%m-%d")
+        results_dir = os.path.join(settings.MEDIA_ROOT, 'results')
+        os.makedirs(results_dir, exist_ok=True)
 
         for row in rowsList:
             # Ensure row has enough columns
@@ -174,7 +188,7 @@ class AddressCorrectionBot:
                 print("Row without a project:", row)
 
         for project_name, rows in projects.items():
-            filename = f'results/{project_name}_project_{current_date}.csv'
+            filename = os.path.join(results_dir, f'{project_name}_project_{current_date}.csv')
             with open(filename, 'w', newline='', encoding='utf-8') as file:
                 writer = csv.writer(file)
                 writer.writerows(rows)
@@ -245,7 +259,10 @@ class AddressCorrectionBot:
                 dest_sheet.merge_cells(str(merged_cell_range))
 
         # Load your Excel template
-        template_path = 'resources/invoice_template.xlsx'
+        resources_dir = os.path.join(settings.MEDIA_ROOT, 'resources')
+        os.makedirs(resources_dir, exist_ok=True)
+        template_path = os.path.join(resources_dir, 'invoice_template.xlsx')
+
         source_wb = load_workbook(template_path)
         source_ws = source_wb.worksheets[0]  # Use the first sheet in the workbook
 
@@ -275,7 +292,8 @@ class AddressCorrectionBot:
 
             # Copy PNG image
 
-            image_path = 'resources/fedexLogo.png'
+
+            image_path = os.path.join(resources_dir, 'fedexLogo.png')
             desired_size = (180, 50)
             # Open the image using PIL
             original_img = PILImage.open(image_path)
@@ -401,7 +419,10 @@ class AddressCorrectionBot:
                     ws.cell(row=4, column=5).font = Font(bold=True)
 
             ws.cell(row=4, column=3).value = project_name
-            save_path = f"results/{project_name}_Invoice.xlsx"
+
+            results_dir = os.path.join(settings.MEDIA_ROOT, 'results')
+            os.makedirs(results_dir, exist_ok=True)
+            save_path = os.path.join(results_dir, f"{project_name}_Invoice.xlsx")
             wb.save(save_path)
             print(f"Workbook saved for {project_name} at {save_path}")
 
