@@ -16,7 +16,7 @@ class AddressCorrectionBot:
     def __init__(self, carton_file, fedex_invoice):
         self.carton_file = carton_file
         self.fedex_invoice = fedex_invoice
-        self.ADDRESS_CORRECTION_FEE = 21.00
+        self.ADDRESS_CORRECTION_FEE = 22.50
 
     def process_files(self):
 
