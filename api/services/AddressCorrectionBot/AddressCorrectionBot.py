@@ -41,9 +41,9 @@ class AddressCorrectionBot:
             raise FileNotFoundError(f"FedEx invoice file not found at {abs_fedexinvoice_path}")
         
         print("type of invoice path:" + str(type(abs_fedexinvoice_path)))
-        rowsList = self.AddressCorrectionSearch(abs_fedexinvoice_path)
-        rowsList = self.CompileNewCSVFile(rowsList, abs_cartonfile_path)
-        projectsData = self.SortCSVbyProject(rowsList)
+        fedexInvoiceRowsWithAddrCorr = self.AddressCorrectionSearch(abs_fedexinvoice_path)
+        combinedInfo = self.CompileNewCSVFile(fedexInvoiceRowsWithAddrCorr, abs_cartonfile_path)
+        projectsData = self.SortCSVbyProject(combinedInfo)
         self.CreateInvoice(projectsData)
         results_dir = os.path.join(settings.MEDIA_ROOT, 'results')
         os.makedirs(results_dir, exist_ok=True)
@@ -86,34 +86,34 @@ class AddressCorrectionBot:
         return resulting_rows
 
 
-    def CompileNewCSVFile(self, rowsWithAddrCorr, cartonFilePath):
-        #Invoice Date
-        #Invoice Number
-        #Express or Ground Tracking Number
-        #Shipment Date
-        #Recipient Name
-        #Recipient Address Line 1
-        #Recipient Address Line 2
-        #Recipient City
-        #Recipient State
-        #Recipient Zip Code
-        #Recipient Country/Territory
-        #Original Customer Reference 50
-        #Original Ref #2
-        #Original Ref #3/PO Number
-        #Tracking ID Charge Description
-        fedexInvoiceColumns = [3, 4, 10, 15, 34, 36, 37, 38, 39, 40, 41, 50, 51, 52, 146, 147]
+    def CompileNewCSVFile(self, addrCorrRows, cartonFilePath):
+        fedexInvoiceColumns = [
+        1,   # Invoice Date
+        2,   # Invoice Number
+        8,   # Express or Ground Tracking Number
+        13,  # Shipment Date
+        32,  # Recipient Name
+        34,  # Recipient Address Line 1
+        35,  # Recipient Address Line 2
+        36,  # Recipient City
+        37,  # Recipient State
+        38,  # Recipient Zip Code
+        39,  # Recipient Country/Territory
+        48,  # Original Customer Reference
+        49,  # Original Ref#2
+        50,  # Original Ref #3/PO Number
+        108  # Tracking ID Charge Description
+        ]
+
         addrCorrInvoiceData = []
 
         current_date = datetime.now().strftime("%Y-%m-%d")
 
-
-
-        for row in rowsWithAddrCorr:
+        for row in addrCorrRows:
             infoNeededFromFedex = []
             for index in fedexInvoiceColumns:
                 if index <= len(row): 
-                    infoNeededFromFedex.append(row[index-1])
+                    infoNeededFromFedex.append(row[index])
 
             addrCorrInvoiceData.append(infoNeededFromFedex)
 
@@ -121,42 +121,45 @@ class AddressCorrectionBot:
 
         results_dir = os.path.join(settings.MEDIA_ROOT, 'results')
         os.makedirs(results_dir, exist_ok=True)
-        filename = os.path.join(results_dir, f'Ungrouped_projects_{current_date}.csv')
+        unsortedAddressCorrectionCSV = os.path.join(results_dir, f'Ungrouped_projects_{current_date}.csv')
 
-        with open(filename, 'w', newline='', encoding='utf-8') as file:
+        with open(unsortedAddressCorrectionCSV, 'w', newline='', encoding='utf-8') as file:
             writer = csv.writer(file)
-
-        # Write each sublist as a row in the CSV file
             for row in addrCorrInvoiceData:
                 writer.writerow(row)
         return(addrCorrInvoiceData)
+    
+        
 
-    def LinkProject(self,addrCorrInvoiceData, cartonFilePath):
-        carton_file_key_col_index = 2  # Column 3 in the carton file (0-indexed)
-        carton_file_data_col_index = (0,19)  # Column 1 in the carton file (0-indexed)
-        addrCorrTrackingNumberIndex = 2  # Assuming the key in rowsList is at index 2
+    def LinkProject(self,addrCorrRows, cartonFilePath):
+        cartonFileTrackingNumIndex = 5 
+        fedexInvoiceTrackingNumIndex = 2
+        cartonFileProjectIndex = 0
+        cartonFileOwnerReferenceIndex = 19
 
         # Read the new CSV file and store it in a dictionary
         carton_dict = {}
         with open(cartonFilePath, 'r', newline='', encoding='utf-8') as file:
             reader = csv.reader(file)
             for row in reader:
-                if len(row) > carton_file_key_col_index:
+                if len(row) > cartonFileTrackingNumIndex:
                     # Store the row in the dictionary where the key is the tracking number and the entire row is the value
-                    carton_dict[row[carton_file_key_col_index].strip()] = row 
+                    cartonFileTrackingNum = row[cartonFileTrackingNumIndex].strip()
+                    carton_dict[cartonFileTrackingNum] = row 
 
-        for addrCorrectionInfo in addrCorrInvoiceData:
-            trackingNumber = addrCorrectionInfo[addrCorrTrackingNumberIndex].strip()
+        #add project and owner reference from cartonfile to addrcorrectinfo array
+        for row in addrCorrRows:
+            trackingNumber = row[fedexInvoiceTrackingNumIndex].strip()
             if trackingNumber in carton_dict:
-                addrCorrectionInfo.append(carton_dict[trackingNumber][carton_file_data_col_index[0]])
-                addrCorrectionInfo.append(carton_dict[trackingNumber][carton_file_data_col_index[1]])
+                row.append(carton_dict[trackingNumber][cartonFileProjectIndex])
+                row.append(carton_dict[trackingNumber][cartonFileOwnerReferenceIndex])
             else:
                 print("Key not found in carton file:", trackingNumber)  # Debugging line
 
-        print("Total Rows Updated in rowsList:", len(addrCorrInvoiceData))  # Debugging line
+        print("Total Rows Updated in rowsList:", len(addrCorrRows))  # Debugging line
 
-    def SortCSVbyProject(self, rowsList):
-        project_col_index = 16  # Column 17 (0-indexed)
+    def SortCSVbyProject(self, addrCorrList):
+        project_col_index = 15  # Column 17 (0-indexed)
         backup_project_col_index = 11  # Column 12 (0-indexed)
         grouped_projects = ['Cosmedix', 'Pur', 'Butter London', 'Aloette']
         grouped_project_name = 'Grouped_Project'
@@ -166,7 +169,7 @@ class AddressCorrectionBot:
         results_dir = os.path.join(settings.MEDIA_ROOT, 'results')
         os.makedirs(results_dir, exist_ok=True)
 
-        for row in rowsList:
+        for row in addrCorrList:
             # Ensure row has enough columns
             while len(row) <= project_col_index:
                 row.append('')
