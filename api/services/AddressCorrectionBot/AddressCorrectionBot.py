@@ -16,7 +16,7 @@ class AddressCorrectionBot:
     def __init__(self, carton_file, fedex_invoice):
         self.carton_file = carton_file
         self.fedex_invoice = fedex_invoice
-        self.ADDRESS_CORRECTION_FEE = 22.50
+        self.ADDRESS_CORRECTION_FEE = 12
 
     def process_files(self):
 
@@ -35,14 +35,15 @@ class AddressCorrectionBot:
         abs_fedexinvoice_path = os.path.join(settings.MEDIA_ROOT, self.fedex_invoice)
         print(f"Absolute Carton File Path: {abs_cartonfile_path}")
         print(f"Absolute FedEx Invoice Path: {abs_fedexinvoice_path}")
+
         if not os.path.isfile(abs_cartonfile_path):
             raise FileNotFoundError(f"Carton file not found at {abs_cartonfile_path}")
         if not os.path.isfile(abs_fedexinvoice_path):
             raise FileNotFoundError(f"FedEx invoice file not found at {abs_fedexinvoice_path}")
         
         print("type of invoice path:" + str(type(abs_fedexinvoice_path)))
-        fedexInvoiceRowsWithAddrCorr = self.AddressCorrectionSearch(abs_fedexinvoice_path)
-        combinedInfo = self.CompileNewCSVFile(fedexInvoiceRowsWithAddrCorr, abs_cartonfile_path)
+        fedexInvoiceRowsWithAddrCorr, addressCorrectionFeeIndex = self.AddressCorrectionSearch(abs_fedexinvoice_path)
+        combinedInfo = self.CompileNewCSVFile(fedexInvoiceRowsWithAddrCorr, abs_cartonfile_path, addressCorrectionFeeIndex)
         projectsData = self.SortCSVbyProject(combinedInfo)
         self.CreateInvoice(projectsData)
         results_dir = os.path.join(settings.MEDIA_ROOT, 'results')
@@ -50,6 +51,7 @@ class AddressCorrectionBot:
         self.delete_non_xlsx_files(results_dir)
 
         generated_files = [os.path.join(results_path, filename) for filename in os.listdir(results_path)]
+
         return generated_files
 
 
@@ -71,6 +73,8 @@ class AddressCorrectionBot:
             reader = csv.reader(file)
             header = next(reader)
             col_index, addr_corr_row = self.find_address_correction_column(csvFilePath, search_term)
+            address_correction_fee_index = col_index + 1
+
             if col_index == None:
                 raise ValueError(f"No rows matching {search_term} were found")
 
@@ -83,26 +87,60 @@ class AddressCorrectionBot:
                     print(f"Row {row_num} does not have a column {col_index}")
 
         #print("Rows after filter:", len(resulting_rows))
-        return resulting_rows
+        return resulting_rows, address_correction_fee_index
+
+    def FindIndexOfColumn(self, columnArray, columnName):
+
+        for i in range(len(columnArray)):
+            currentColumnName = columnArray[i]
+            if columnName == currentColumnName:
+                return i
+
+        return -1
+
+  #  def GenerateInvoiceColumnDict(self, fedexInvoiceColumnNames, fedexInvoiceCSVFilePath):
+        
 
 
-    def CompileNewCSVFile(self, addrCorrRows, cartonFilePath):
+    def CompileNewCSVFile(self, addrCorrRows, cartonFilePath, addressCorrectionFeeIndex):
+        
+        fedexInvoiceColumnNames = [
+            "Invoice Date",
+            "Invoice Number",
+            "Express or Ground Tracking ID",
+            "Shipment Date",
+            "Recipient Name",
+            "Recipient Address Line 1",
+            "Recipient Address Line 2",
+            "Recipient City",
+            "Recipient State",
+            "Recipient Zip Code",
+            "Recipient Country/Territory",
+            "Original Customer Reference",
+            "Original Ref#2",
+            "Original Ref#3/PO Number",
+            "Tracking ID Charge Description"
+        ]
+
+        #fedexInvoiceColumnDict = 
+
         fedexInvoiceColumns = [
-        1,   # Invoice Date
-        2,   # Invoice Number
-        8,   # Express or Ground Tracking Number
-        13,  # Shipment Date
-        32,  # Recipient Name
-        34,  # Recipient Address Line 1
-        35,  # Recipient Address Line 2
-        36,  # Recipient City
-        37,  # Recipient State
-        38,  # Recipient Zip Code
-        39,  # Recipient Country/Territory
-        48,  # Original Customer Reference
-        49,  # Original Ref#2
-        50,  # Original Ref #3/PO Number
-        108  # Tracking ID Charge Description
+        addressCorrectionFeeIndex,
+        2,   # Invoice Date
+        3,   # Invoice Number
+        9,   # Express or Ground Tracking Number
+        14,  # Shipment Date
+        33,  # Recipient Name
+        35,  # Recipient Address Line 1
+        36,  # Recipient Address Line 2
+        37,  # Recipient City
+        38,  # Recipient State
+        39,  # Recipient Zip Code
+        40,  # Recipient Country/Territory
+        49,  # Original Customer Reference
+        50,  # Original Ref#2
+        51,  # Original Ref #3/PO Number
+        107  # Tracking ID Charge Description,
         ]
 
         addrCorrInvoiceData = []
@@ -133,8 +171,8 @@ class AddressCorrectionBot:
 
     def LinkProject(self,addrCorrRows, cartonFilePath):
         cartonFileTrackingNumIndex = 5 
-        fedexInvoiceTrackingNumIndex = 2
-        cartonFileProjectIndex = 0
+        fedexInvoiceTrackingNumIndex = 2 + 1
+        cartonFileProjectIndex = 0 
         cartonFileOwnerReferenceIndex = 19
 
         # Read the new CSV file and store it in a dictionary
@@ -159,8 +197,8 @@ class AddressCorrectionBot:
         print("Total Rows Updated in rowsList:", len(addrCorrRows))  # Debugging line
 
     def SortCSVbyProject(self, addrCorrList):
-        project_col_index = 15  # Column 17 (0-indexed)
-        backup_project_col_index = 11  # Column 12 (0-indexed)
+        project_col_index = 15 + 1  # Column 17 (0-indexed)
+        backup_project_col_index = 11 + 1 # Column 12 (0-indexed)
         grouped_projects = ['Cosmedix', 'Pur', 'Butter London', 'Aloette']
         grouped_project_name = 'Grouped_Project'
         projects = {}
@@ -197,19 +235,17 @@ class AddressCorrectionBot:
                 writer.writerows(rows)
 
         print(f"Created {len(projects)} project CSV files.")
-
+        
         return projects
 
     def CreateInvoice(self, projectsData):
         # Generate an invoice based on a CSV file
-        
         current_date = datetime.now().strftime("%Y-%m-%d")
 
         regular_font = Font(bold=False)  # Define a regular font style
         bold_font = Font(bold=True)  # Define a bold font style
         bold_underline_font = Font(bold=True, underline='single')  # Define a bold and underlined font style
         gray_fill = PatternFill(start_color='FFD3D3D3', end_color='FFD3D3D3', fill_type='solid')  # Define a gray fill
-
 
         def copy_header(source_sheet, dest_sheet):
             # Copy header (rows 1-6)
@@ -320,10 +356,11 @@ class AddressCorrectionBot:
             # Loop through data and create invoice blocks
             for index, data_list in enumerate(data_lists):
                 start_row = 7 + (index * 7)  # New block every 7 rows
-                total += self.ADDRESS_CORRECTION_FEE
+                real_address_correction_price = float(data_list[0])
+                total += real_address_correction_price
 
                 #print(f"data_list[15] before conversion: '{data_list[15]}'")
-
+                data_list = data_list[1:]
                 # Enter data into specific cells
                 if len(data_list) > 6:
                     date_obj = datetime.strptime(data_list[0], '%Y%m%d').strftime('%b %d, %Y')
@@ -395,8 +432,8 @@ class AddressCorrectionBot:
                     else:
                         ws.cell(row=start_row + 5, column=3).value = str(data_list[7] + ' ' + data_list[8] + ' ' + data_list[9])  # 
                     ws.cell(row=start_row + 5, column=5).value = data_list[14]  # 
-                    
-                    ws.cell(row=start_row + 5, column=7).value = f"${self.ADDRESS_CORRECTION_FEE:.2f}"
+
+                    ws.cell(row=start_row + 5, column=7).value = f"${real_address_correction_price:.2f}"
 
                     for x in range(2):  # Rows 0 and 1
                         for y in range(7):  # Columns 0 to 6
